@@ -1,47 +1,47 @@
-import { distance as turfDistance } from '@turf/turf';
+function haversine([lng1, lat1], [lng2, lat2]) {
+  const R = 6371;
+  const toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLon = (lng2 - lng1) * toRad;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
 export function buildGraph(geojson) {
-  const nodes = new Map();
-  const nodeCoords = [];
-  const edges = new Map();
+  const nodes = [];
+  const edges = {};
 
-  function registerNode(lng, lat) {
+  function register(lng, lat) {
     const key = `${lng},${lat}`;
-    if (!nodes.has(key)) {
-      const id = nodeCoords.length;
-      nodes.set(key, id);
-      nodeCoords.push([lng, lat]);
-      edges.set(id, []);
+    if (nodes.__map == null) {
+      nodes.__map = Object.create(null);
     }
-    return nodes.get(key);
+    let id = nodes.__map[key];
+    if (id == null) {
+      id = nodes.length;
+      nodes.__map[key] = id;
+      nodes.push([lng, lat]);
+      edges[id] = [];
+    }
+    return id;
   }
 
-  geojson.features
-    .filter((feature) => feature.geometry.type === 'LineString')
-    .forEach((feature) => {
-      const coords = feature.geometry.coordinates;
-      if (!Array.isArray(coords) || coords.length < 2) {
-        console.warn('Skipping invalid LineString feature:', feature);
-        return;
-      }
-      for (let i = 0; i < coords.length - 1; i++) {
-        const [lng, lat] = coords[i];
-        if (typeof lng !== 'number' || typeof lat !== 'number') {
-          console.error('Invalid coordinate in GeoJSON:', coords[i]);
-          continue;
-        }
-        const u = registerNode(lng, lat);
-        const [nextLng, nextLat] = coords[i + 1];
-        if (typeof nextLng !== 'number' || typeof nextLat !== 'number') {
-          console.error('Invalid coordinate in GeoJSON:', coords[i + 1]);
-          continue;
-        }
-        const v = registerNode(nextLng, nextLat);
-        const w = turfDistance([lng, lat], [nextLng, nextLat]);
-        edges.get(u).push({ to: v, weight: w });
-        edges.get(v).push({ to: u, weight: w });
-      }
-    });
+  for (const feat of geojson.features) {
+    if (feat.geometry.type !== 'LineString') continue;
+    const coords = feat.geometry.coordinates;
+    for (let i = 0; i + 1 < coords.length; i++) {
+      const [lng1, lat1] = coords[i];
+      const [lng2, lat2] = coords[i + 1];
+      const u = register(lng1, lat1);
+      const v = register(lng2, lat2);
+      const w = haversine([lng1, lat1], [lng2, lat2]);
+      edges[u].push({ to: v, w });
+      edges[v].push({ to: u, w });
+    }
+  }
 
-  return { nodes, nodeCoords, edges };
+  return { nodes, edges };
 }

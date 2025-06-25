@@ -1,90 +1,102 @@
-import { distance as turfDistance } from '@turf/turf';
+function haversine([lng1, lat1], [lng2, lat2]) {
+  const R = 6371;
+  const toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLon = (lng2 - lng1) * toRad;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+class MinHeap {
+  constructor() {
+    this.data = [];
+  }
+  push(item) {
+    this.data.push(item);
+    let i = this.data.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.data[p].f <= this.data[i].f) break;
+      [this.data[p], this.data[i]] = [this.data[i], this.data[p]];
+      i = p;
+    }
+  }
+  pop() {
+    if (this.data.length === 0) return null;
+    const top = this.data[0];
+    const last = this.data.pop();
+    if (this.data.length) {
+      this.data[0] = last;
+      let i = 0;
+      while (true) {
+        const l = 2 * i + 1,
+          r = 2 * i + 2;
+        let m = i;
+        if (l < this.data.length && this.data[l].f < this.data[m].f) m = l;
+        if (r < this.data.length && this.data[r].f < this.data[m].f) m = r;
+        if (m === i) break;
+        [this.data[i], this.data[m]] = [this.data[m], this.data[i]];
+        i = m;
+      }
+    }
+    return top;
+  }
+  isEmpty() {
+    return this.data.length === 0;
+  }
+}
 
 export function findPath(graph, startLngLat, endLngLat) {
-  const { nodeCoords, edges } = graph;
+  const { nodes, edges } = graph;
 
-  function nearestNode([lng, lat]) {
-    if (typeof lng !== 'number' || typeof lat !== 'number') {
-      console.error('Invalid input coordinates:', [lng, lat]);
-      throw new Error('Input coordinates must be numbers');
-    }
-
-    let bestId = null,
-      bestDist = Infinity;
-    nodeCoords.forEach((coords, id) => {
-      if (
-        !Array.isArray(coords) ||
-        coords.length !== 2 ||
-        typeof coords[0] !== 'number' ||
-        typeof coords[1] !== 'number'
-      ) {
-        console.error('Invalid nodeCoords entry at id', id, ':', coords);
-        return;
+  function nearest(pt) {
+    let best = 0,
+      bd = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const d = haversine(nodes[i], pt);
+      if (d < bd) {
+        bd = d;
+        best = i;
       }
-
-      try {
-        const d = turfDistance(coords, [lng, lat]);
-        if (d < bestDist) {
-          bestDist = d;
-          bestId = id;
-        }
-      } catch (e) {
-        console.error(
-          'Error with turf.distance for coords:',
-          coords,
-          'and',
-          [lng, lat],
-          e,
-        );
-      }
-    });
-
-    if (bestId === null) {
-      throw new Error('No valid nodes found');
     }
-    return bestId;
+    return best;
   }
 
-  const startId = nearestNode(startLngLat);
-  const endId = nearestNode(endLngLat);
+  const start = nearest(startLngLat);
+  const end = nearest(endLngLat);
+  const N = nodes.length;
 
-  const N = nodeCoords.length;
-  const dist = Array(N).fill(Infinity);
-  const prev = Array(N).fill(null);
-  const visited = new Set();
+  const g = new Array(N).fill(Infinity);
+  const prev = new Array(N).fill(-1);
+  const open = new MinHeap();
+  const closed = new Set();
 
-  dist[startId] = 0;
-  while (true) {
-    let u = -1,
-      bestScore = Infinity;
-    for (let i = 0; i < N; i++) {
-      if (visited.has(i)) continue;
-      const g = dist[i];
-      if (g === Infinity) continue;
-      const h = turfDistance(nodeCoords[i], nodeCoords[endId]);
-      const score = g + h;
-      if (score < bestScore) {
-        bestScore = score;
-        u = i;
-      }
-    }
-    if (u === -1 || u === endId) break;
-    visited.add(u);
+  g[start] = 0;
+  open.push({ id: start, f: haversine(nodes[start], nodes[end]) });
 
-    for (const { to: v, weight: w } of edges.get(u)) {
-      const alt = dist[u] + w;
-      if (alt < dist[v]) {
-        dist[v] = alt;
+  while (!open.isEmpty()) {
+    const { id: u } = open.pop();
+    if (u === end) break;
+    if (closed.has(u)) continue;
+    closed.add(u);
+
+    for (const { to: v, w } of edges[u]) {
+      const ng = g[u] + w;
+      if (ng < g[v]) {
+        g[v] = ng;
         prev[v] = u;
+        const f = ng + haversine(nodes[v], nodes[end]);
+        open.push({ id: v, f });
       }
     }
   }
 
   const path = [];
-  let cur = endId;
-  while (cur !== null) {
-    path.push(nodeCoords[cur]);
-    cur = prev[cur];
+  for (let cur = end; cur !== -1; cur = prev[cur]) {
+    path.push(nodes[cur]);
   }
   return path.reverse();
 }
